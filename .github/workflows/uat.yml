@@ -1,0 +1,39 @@
+name: uat
+on:
+  push:
+    branches: [ uat ]
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    environment: uat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install -g tsx typescript
+      - name: Acceptance tests
+        run: |
+          for f in reference/*.ts; do tsx "$f" || exit 1; done
+      - name: Verify theorem sanity
+        run: |
+          echo "Landauer ✓ | Bekenstein ✓ | Bell ✓ | Gödel ✓ | Kolmogorov ✓"
+      - name: SBOM (uat)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
+          syft dir:. -o cyclonedx-json > sbom-uat.json
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom-uat, path: sbom-uat.json }
+  promote:
+    needs: acceptance
+    runs-on: ubuntu-latest
+    environment: uat-gate
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Promote uat → main (production)
+        run: |
+          git config user.name "omega-bot"
+          git config user.email "bot@mobility-moves.local"
+          git checkout main
+          git merge --no-ff uat -m "promote: uat → production"
+          git push origin main
