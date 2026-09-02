@@ -1,0 +1,41 @@
+name: staging
+on:
+  push:
+    branches: [ staging ]
+  pull_request:
+    branches: [ staging ]
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install -g tsx typescript
+      - name: Type-check + run reference implementations
+        run: |
+          for f in reference/*.ts; do
+            tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler "$f" || exit 1
+            tsx "$f" || exit 1
+          done
+      - name: SBOM (staging)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
+          syft dir:. -o cyclonedx-json > sbom-staging.json
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom-staging, path: sbom-staging.json }
+  promote:
+    needs: integration
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Promote staging → uat
+        run: |
+          git config user.name "omega-bot"
+          git config user.email "bot@mobility-moves.local"
+          git checkout uat || git checkout -b uat
+          git merge --no-ff staging -m "promote: staging → uat"
+          git push origin uat
