@@ -1,0 +1,38 @@
+name: production
+on:
+  push:
+    branches: [ main ]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install -g tsx typescript
+      - name: Final verification
+        run: |
+          for f in reference/*.ts; do
+            tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler "$f" || exit 1
+            tsx "$f" || exit 1
+          done
+      - name: SBOM (production)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
+          syft dir:. -o cyclonedx-json > sbom-production.json
+      - name: SLSA Level 3 provenance
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic@v2.0.0
+        with:
+          artifact-path: sbom-production.json
+      - name: Tag release
+        run: |
+          TAG="v$(date +%Y%m%d)-${GITHUB_SHA::7}"
+          git tag "$TAG"
+          git push origin "$TAG"
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom-production, path: sbom-production.json }
